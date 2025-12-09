@@ -1,29 +1,29 @@
 📌 專案簡介
 
-此專案包含：
+本專案提供：
 
-假資料產生器：可生成大量 SQL INSERT 語句（含隨機時間、帳號、JSON payload 等）。
+假資料 SQL 產生器 (generate_fake_sql_1M.py)
 
-批次匯入工具（loader）：可將大型 SQL 檔（含 .gz 壓縮檔）分批匯入 MySQL。
+MySQL 分批匯入工具 (sql_stream_loader.py)
 
-適用於：
+用途包含：
 
-壓力測試
+壓力測試（Stress Test）
 
-前後端 Demo 資料準備
+大量資料灌入（100 萬筆以上）
 
-ETL / 資料遷移演練
+ETL / Data Migration 測試
 
-大量寫入效能測試
+效能驗證、Demo
 
-🧱 目錄結構
+🧱 專案結構
 python_workspace/
 │
-├── generate_fake_sql_1M.py       # 假資料產生器
-├── sql_stream_loader.py          # 分批匯入 MySQL 工具
-├── fake_t_order_http_log_1M.sql.gz (產生後會出現)
-├── fake_t_order_http_log_1M.sql   (解壓後)
-└── loader.progress               # 匯入續傳檔 (自動生成)
+├── generate_fake_sql_1M.py          # 假資料產生器
+├── sql_stream_loader.py             # MySQL 批次匯入工具
+├── fake_t_order_http_log_1M.sql.gz  # 假資料 (壓縮)
+├── fake_t_order_http_log_1M.sql     # 假資料 (解壓)
+└── loader.progress                  # 匯入續傳檔
 
 🔧 安裝與環境準備
 1️⃣ 建立 Python 虛擬環境（建議）
@@ -34,41 +34,46 @@ python -m pip install --upgrade pip
 python -m pip install mysql-connector-python
 
 
-使用虛擬環境可避免 Homebrew/Python 版本衝突。
+⚠ 虛擬環境確認方式：
+若你的命令列前面有 (.venv) → 就是啟用中。
+或可用：
 
-🛠 功能一：生成假資料 SQL
-產生 100 萬筆（壓縮檔）
+echo $VIRTUAL_ENV
+
+🛠 產生假資料
+2️⃣ 生成 100 萬筆假資料（壓縮檔）
 python generate_fake_sql_1M.py \
   --out /Users/kai/Desktop/python_workspace/fake_t_order_http_log_1M.sql.gz \
   --rows 1000000 \
   --batch 1000
 
 
-產生完成後會看到：
+完成後會看到：
 
 Written 1000000 rows...
 Done.
 
-🔧 功能二：解壓 SQL 檔案（如需 loader 匯入）
-gunzip -c /Users/kai/Desktop/python_workspace/fake_t_order_http_log_1M.sql.gz \
+🗜 解壓 SQL（loader 必須使用 .sql）
+gunzip -c \
+  /Users/kai/Desktop/python_workspace/fake_t_order_http_log_1M.sql.gz \
   > /Users/kai/Desktop/python_workspace/fake_t_order_http_log_1M.sql
 
 
-確認：
+確認檔案：
 
 ls -lh fake_t_order_http_log_1M.sql
 head -n 3 fake_t_order_http_log_1M.sql
 
-📥 功能三：匯入資料到 MySQL
-方法 A（最快）💨 — MySQL CLI 直接匯入
-
-適用於乾淨灌資料、不需要 resume。
-
+📥 匯入假資料到 MySQL
+方法 A（最快速）💨 — MySQL CLI 直接匯入
 mysql -h 192.168.1.171 -P 3306 -u root -p'YOUR_PASSWORD' g_paypay \
-  < /Users/kai/Desktop/python_workspace/fake_t_order_http_log_1M.sql
+  < /Users/kai/Desktop/python_workspace/fake_t_order_http_log_1_000_000.sql
 
-方法 B（可中斷 & 可 resume）🐍 — Python Loader
-基本匯入方式
+
+✔ 適合大量灌資料，速度最快
+✘ 不支援續傳
+
+方法 B（可中斷續傳）🐍 — Python Loader 匯入
 python sql_stream_loader.py \
   --input /Users/kai/Desktop/python_workspace/fake_t_order_http_log_1M.sql \
   --host 192.168.1.171 --port 3306 \
@@ -80,38 +85,44 @@ python sql_stream_loader.py \
 
 參數說明
 參數	說明
---input	.sql 或 .sql.gz 檔案
---batch-statements	每次提交多少 SQL（建議 50–200）
---progress	儲存續傳 offset（中斷可接續）
---print-progress-every	每 N 條印一次進度
+--input	.sql 檔案路徑
+--batch-statements	每次提交多少條 SQL（建議 50～200）
+--progress	儲存 offset，可中斷續傳
+--print-progress-every	印出進度的頻率
 中斷後續傳
 python sql_stream_loader.py --input ... --same-options...
 
+⚠ 注意事項（重要）
+1️⃣ .sql.gz 不可直接匯入 loader（需先解壓）
 
-只要 loader.progress 還在，就會從上一個 offset 繼續。
+loader 只能讀可解析的 SQL。
 
-⚠ 注意事項（必看）
-1️⃣ .sql.gz 不能直接給 loader（需要解壓）
+2️⃣ .sql 必須以分號 ; 結尾
 
-若用 .gz 請務必：
+否則 loader 會判定無法執行 SQL
+症狀：
 
-gunzip -c xxx.sql.gz > xxx.sql
+All done. statements: 0
 
-2️⃣ 確保每條 SQL 都用「;」結尾
+3️⃣ 若 loader 看起來卡住 → 其實是在讀第一條巨大 SQL
 
-loader 用分號分句，沒分號會導致：
+可切換測試模式：
 
-statements: 0
+--batch-statements 1
+--print-progress-every 1
 
-3️⃣ loader 若顯示卡住 → 很可能是在讀第一條超長 SQL
 
-解法：
+確認正常後再改回 50。
 
---batch-statements 1 --print-progress-every 1
+4️⃣ 若重跑記得刪掉 progress 檔案
 
-4️⃣ MySQL 若速度太慢
+避免 offset 錯置：
 
-可在匯入前加入：
+rm -f loader.progress
+
+5️⃣ 匯入期間建議關閉外鍵/唯一檢查（大幅加速）
+
+匯入前：
 
 SET autocommit=0;
 SET unique_checks=0;
@@ -124,30 +135,34 @@ SET foreign_key_checks=1;
 SET unique_checks=1;
 COMMIT;
 
-5️⃣ 若主鍵重複（OrderId），匯入會被 rollback
-
-建議假資料 OrderId 使用：
-
-時間戳 + 隨機數
-
-或 UUID
-
-6️⃣ loader.progress 建議在重新跑前刪除
-
-避免 offset 混亂：
-
-rm -f loader.progress
-
-⚡ 效能建議
-方法	性能	適用情境
-MySQL CLI < file.sql	⭐⭐⭐⭐⭐ 最快	大量一次性匯入
-Loader batch = 200	⭐⭐⭐⭐	可控、可續傳
-Loader batch = 1	⭐	測試用，不適合大量匯入
-🧪 匯入後驗證
+⚡ 效能比較
+匯入方式	效能	適用
+MySQL CLI < file.sql	⭐⭐⭐⭐⭐ 最快	單純灌資料
+Python Loader（batch=50）	⭐⭐⭐⭐	可續傳、可控
+Loader（batch=1）	⭐	測試用
+🧪 匯入後驗證資料
 SELECT COUNT(*) FROM t_order_http_log;
 SELECT MIN(SubmitTime), MAX(SubmitTime) FROM t_order_http_log;
 
-🧹 清除匯入檔案
+🧹 清除產生的檔案（可選）
 rm fake_t_order_http_log_1M.sql
 rm fake_t_order_http_log_1M.sql.gz
 rm loader.progress
+
+🧩 Troubleshooting（FAQ）
+❓ 匯入顯示 statements: 0
+
+→ .sql 沒分號 / .sql 是空的 / loader 讀不到檔案
+
+❓ 匯入卡住
+
+→ 第一條 SQL 太長 → 不是卡住，只是在讀取
+→ 使用：
+
+--batch-statements 1 --print-progress-every 1
+
+❓ Python 版本衝突
+
+→ 啟用虛擬環境：
+
+source .venv/bin/activate
